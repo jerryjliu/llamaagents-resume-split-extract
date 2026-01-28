@@ -52,15 +52,15 @@ async def test_process_file_workflow(
             "Skipping test because it cannot be mocked. Set `FAKE_LLAMA_CLOUD=true` in your environment to enable this test..."
         )
         return
-    try:
-        result = await process_file_workflow.run(start_event=FileEvent(file_id=file_id))
-    except Exception:
-        result = None
+    result = await process_file_workflow.run(start_event=FileEvent(file_id=file_id))
     assert result is not None
-    # all generated agent data IDs are alphanumeric strings with 7 characters
-    # the following assert statements ensure that that is the case
-    assert isinstance(result, str)
-    assert len(result) == 7
+    # The workflow returns a list of agent data IDs (one per resume extracted)
+    # Each ID is an alphanumeric string with 7 characters
+    assert isinstance(result, list)
+    assert len(result) >= 1
+    for item_id in result:
+        assert isinstance(item_id, str)
+        assert len(item_id) == 7
 
 
 # </adapt>
