@@ -1,9 +1,7 @@
-import asyncio
 import hashlib
 import logging
 import os
 import tempfile
-from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import httpx
@@ -16,7 +14,12 @@ from workflows.events import Event, StartEvent, StopEvent
 from workflows.resource import Resource, ResourceConfig
 
 from .clients import agent_name, get_llama_cloud_client, project_id
-from .config import EXTRACTED_DATA_COLLECTION, ExtractConfig, get_extraction_schema
+from .config import (
+    EXTRACTED_DATA_COLLECTION,
+    ExtractConfig,
+    SplitConfig,
+    get_extraction_schema,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +31,14 @@ class FileEvent(StartEvent):
 class Status(Event):
     level: Literal["info", "warning", "error"]
     message: str
+
+
+class SplitJobStartedEvent(Event):
+    pass
+
+
+class StartNextExtractionEvent(Event):
+    pass
 
 
 class ExtractJobStartedEvent(Event):
@@ -44,21 +55,157 @@ class ExtractedInvalidEvent(Event):
     data: ExtractedData[dict[str, Any]]
 
 
+class ResumeSegment(BaseModel):
+    """A segment representing one resume in the book."""
+
+    pages: list[int]
+    category: str
+    confidence: str
+
+
 class ExtractionState(BaseModel):
     file_id: str | None = None
     file_path: str | None = None
     filename: str | None = None
     file_hash: str | None = None
+    split_job_id: str | None = None
+    segments: list[ResumeSegment] = []
+    current_segment_index: int = 0
     extract_job_id: str | None = None
+    extracted_ids: list[str] = []
 
 
 class ProcessFileWorkflow(Workflow):
-    """Extract structured data from a document and save it for review."""
+    """Split a resume book into individual resumes and extract information from each."""
+
+    @step()
+    async def start_split(
+        self,
+        event: FileEvent,
+        ctx: Context[ExtractionState],
+        llama_cloud_client: Annotated[
+            AsyncLlamaCloud, Resource(get_llama_cloud_client)
+        ],
+        split_config: Annotated[
+            SplitConfig,
+            ResourceConfig(
+                config_file="configs/config.json",
+                path_selector="split",
+                label="Resume Split Settings",
+                description="Categories for identifying individual resumes in a resume book",
+            ),
+        ],
+    ) -> SplitJobStartedEvent:
+        """Upload document and start splitting into individual resumes."""
+        file_id = event.file_id
+        logger.info(f"Processing resume book {file_id}")
+
+        # Download file from cloud storage
+        files = await llama_cloud_client.files.query(
+            filter=Filter(file_ids=[file_id])
+        )
+        file_metadata = files.items[0]
+        file_url = await llama_cloud_client.files.get(file_id=file_id)
+
+        temp_dir = tempfile.gettempdir()
+        filename = file_metadata.name
+        file_path = os.path.join(temp_dir, filename)
+
+        async with httpx.AsyncClient() as client:
+            async with client.stream("GET", file_url.url) as response:
+                with open(file_path, "wb") as f:
+                    async for chunk in response.aiter_bytes():
+                        f.write(chunk)
+
+        logger.info(f"Downloaded resume book to {file_path}")
+        ctx.write_event_to_stream(
+            Status(level="info", message=f"Splitting resume book: {filename}")
+        )
+
+        # Compute file hash for deduplication
+        with open(file_path, "rb") as f:
+            file_hash = hashlib.sha256(f.read()).hexdigest()
+
+        # Start split job to identify individual resumes
+        categories = [
+            {"name": cat.name, "description": cat.description}
+            for cat in split_config.categories
+        ]
+        split_job = await llama_cloud_client.beta.split.create(
+            categories=categories,
+            document_input={"type": "file_id", "value": file_id},
+            project_id=project_id,
+        )
+
+        # Save state
+        async with ctx.store.edit_state() as state:
+            state.file_id = file_id
+            state.file_path = file_path
+            state.filename = filename
+            state.file_hash = file_hash
+            state.split_job_id = split_job.id
+
+        return SplitJobStartedEvent()
+
+    @step()
+    async def complete_split(
+        self,
+        event: SplitJobStartedEvent,
+        ctx: Context[ExtractionState],
+        llama_cloud_client: Annotated[
+            AsyncLlamaCloud, Resource(get_llama_cloud_client)
+        ],
+    ) -> StartNextExtractionEvent | StopEvent:
+        """Wait for split to complete and prepare segments for extraction."""
+        state = await ctx.store.get_state()
+        if state.split_job_id is None:
+            raise ValueError("Split job ID is required")
+
+        # Wait for split job to complete
+        completed_job = await llama_cloud_client.beta.split.wait_for_completion(
+            state.split_job_id,
+            polling_interval=1.0,
+        )
+
+        if completed_job.result is None:
+            ctx.write_event_to_stream(
+                Status(level="error", message="Split job failed - no results")
+            )
+            return StopEvent(result=None)
+
+        # Parse segments
+        segments = [
+            ResumeSegment(
+                pages=seg.pages,
+                category=seg.category,
+                confidence=seg.confidence_category or "unknown",
+            )
+            for seg in completed_job.result.segments
+        ]
+
+        if not segments:
+            ctx.write_event_to_stream(
+                Status(level="warning", message="No resumes found in the document")
+            )
+            return StopEvent(result=None)
+
+        ctx.write_event_to_stream(
+            Status(
+                level="info",
+                message=f"Found {len(segments)} resumes in the book",
+            )
+        )
+
+        async with ctx.store.edit_state() as state:
+            state.segments = segments
+            state.current_segment_index = 0
+
+        return StartNextExtractionEvent()
 
     @step()
     async def start_extraction(
         self,
-        event: FileEvent,
+        event: StartNextExtractionEvent,
         ctx: Context[ExtractionState],
         llama_cloud_client: Annotated[
             AsyncLlamaCloud, Resource(get_llama_cloud_client)
@@ -68,67 +215,47 @@ class ProcessFileWorkflow(Workflow):
             ResourceConfig(
                 config_file="configs/config.json",
                 path_selector="extract",
-                label="Extraction Settings",
-                description="Configuration for document extraction quality and features",
+                label="Resume Extraction Settings",
+                description="Fields to extract from each resume (name, skills, experience, etc.)",
             ),
         ],
-    ) -> ExtractJobStartedEvent:
-        """Download document and start extraction job."""
-        file_id = event.file_id
-        logger.info(f"Running file {file_id}")
+    ) -> ExtractJobStartedEvent | StopEvent:
+        """Start extraction for the current resume segment."""
+        state = await ctx.store.get_state()
 
-        # Download file from cloud storage
-        try:
-            files = await llama_cloud_client.files.query(
-                filter=Filter(file_ids=[file_id])
-            )
-            file_metadata = files.items[0]
-            file_url = await llama_cloud_client.files.get(file_id=file_id)
-
-            temp_dir = tempfile.gettempdir()
-            filename = file_metadata.name
-            file_path = os.path.join(temp_dir, filename)
-            client = httpx.AsyncClient()
-            # Report progress to the UI
-            logger.info(f"Downloading file {file_url.url} to {file_path}")
-
-            async with client.stream("GET", file_url.url) as response:
-                with open(file_path, "wb") as f:
-                    async for chunk in response.aiter_bytes():
-                        f.write(chunk)
-            logger.info(f"Downloaded file {file_url.url} to {file_path}")
-
-        except Exception as e:
-            logger.error(f"Error downloading file {file_id}: {e}", exc_info=True)
+        # Check if we have more segments to process
+        if state.current_segment_index >= len(state.segments):
             ctx.write_event_to_stream(
                 Status(
-                    level="error",
-                    message=f"Error downloading file {file_id}: {e}",
+                    level="info",
+                    message=f"Completed extracting {len(state.extracted_ids)} resumes",
                 )
             )
-            raise e
+            return StopEvent(result=state.extracted_ids)
 
-        # Start extraction job
-        # track the content of the file, so as to be able to de-duplicate
-        file_content = Path(file_path).read_bytes()
-        logger.info(f"Extracting data from file {filename}")
+        segment = state.segments[state.current_segment_index]
+        resume_num = state.current_segment_index + 1
+        total = len(state.segments)
+
         ctx.write_event_to_stream(
-            Status(level="info", message=f"Extracting data from file {filename}")
+            Status(
+                level="info",
+                message=f"Extracting resume {resume_num} of {total} (pages {segment.pages[0]}-{segment.pages[-1]})",
+            )
         )
 
+        # Start extraction for this segment's pages
         extract_job = await llama_cloud_client.extraction.run(
-            config=extract_config.settings.model_dump(),
+            config={
+                **extract_config.settings.model_dump(),
+                "target_pages": segment.pages,
+            },
             data_schema=extract_config.json_schema,
-            file_id=file_id,
+            file_id=state.file_id,
             project_id=project_id,
         )
 
-        # Save state (mutation at end of step)
         async with ctx.store.edit_state() as state:
-            state.file_id = file_id
-            state.file_path = file_path
-            state.filename = filename
-            state.file_hash = hashlib.sha256(file_content).hexdigest()
             state.extract_job_id = extract_job.id
 
         return ExtractJobStartedEvent()
@@ -146,20 +273,16 @@ class ProcessFileWorkflow(Workflow):
             ResourceConfig(
                 config_file="configs/config.json",
                 path_selector="extract",
-                label="Extraction Settings",
-                description="Configuration for document extraction quality and features",
+                label="Resume Extraction Settings",
+                description="Fields to extract from each resume (name, skills, experience, etc.)",
             ),
         ],
-    ) -> StopEvent:
-        """Wait for extraction to complete, validate results, and save for review."""
+    ) -> StartNextExtractionEvent:
+        """Complete extraction and save result, then trigger next segment."""
         state = await ctx.store.get_state()
-        if state.extract_job_id is None:
-            raise ValueError("Job ID cannot be null when waiting for its completion")
 
-        # Wait for extraction job to complete
-        await llama_cloud_client.extraction.jobs.wait_for_completion(
-            state.extract_job_id
-        )
+        # Wait for extraction to complete
+        await llama_cloud_client.extraction.jobs.wait_for_completion(state.extract_job_id)
 
         # Get extraction result
         extracted_result = await llama_cloud_client.extraction.jobs.get_result(
@@ -169,88 +292,56 @@ class ProcessFileWorkflow(Workflow):
             run_id=extracted_result.run_id
         )
 
-        # Validate and parse extraction result
+        segment = state.segments[state.current_segment_index]
+
+        # Validate and create ExtractedData
         extracted_event: ExtractedEvent | ExtractedInvalidEvent
         try:
-            logger.info(f"Extracted data: {extracted_result}")
-            # Create dynamic Pydantic model from JSON schema
             schema_class = get_extraction_schema(extract_config.json_schema)
-            # Use from_extraction_result for proper metadata extraction
+            segment_filename = f"{state.filename} - Resume {state.current_segment_index + 1} (pages {segment.pages[0]}-{segment.pages[-1]})"
+
             data = ExtractedData.from_extraction_result(
                 result=extract_run,
                 schema=schema_class,
-                file_name=state.filename,
+                file_name=segment_filename,
                 file_id=state.file_id,
-                file_hash=state.file_hash,
+                file_hash=f"{state.file_hash}-segment-{state.current_segment_index}",
             )
             extracted_event = ExtractedEvent(data=data)
         except InvalidExtractionData as e:
-            logger.error(f"Error validating extracted data: {e}", exc_info=True)
+            logger.error(f"Invalid extraction data for segment {state.current_segment_index}: {e}")
             extracted_event = ExtractedInvalidEvent(data=e.invalid_item)
-        except Exception as e:
-            logger.error(
-                f"Error extracting data from file {state.filename}: {e}",
-                exc_info=True,
-            )
-            ctx.write_event_to_stream(
-                Status(
-                    level="error",
-                    message=f"Error extracting data from file {state.filename}: {e}",
-                )
-            )
-            raise e
 
-        # Stream the extracted event to client
+        # Stream the result
         ctx.write_event_to_stream(extracted_event)
 
-        # Save extracted data for review
+        # Save to Agent Data
         extracted_data = extracted_event.data
         data_dict = extracted_data.model_dump()
-        # remove past data when reprocessing the same file
-        if extracted_data.file_hash is not None:
+
+        # Remove past data for this specific segment
+        if extracted_data.file_hash:
             await llama_cloud_client.beta.agent_data.delete_by_query(
                 deployment_name=agent_name or "_public",
                 collection=EXTRACTED_DATA_COLLECTION,
-                filter={
-                    "file_hash": {
-                        "eq": extracted_data.file_hash,
-                    },
-                },
+                filter={"file_hash": {"eq": extracted_data.file_hash}},
             )
-        logger.info(
-            f"Removing past data for file {extracted_data.file_name} with hash {extracted_data.file_hash}"
-        )
-        # finally, save the new data
+
         item = await llama_cloud_client.beta.agent_data.agent_data(
             data=data_dict,
             deployment_name=agent_name or "_public",
             collection=EXTRACTED_DATA_COLLECTION,
         )
-        logger.info(
-            f"Recorded extracted data for file {extracted_data.file_name or ''}"
-        )
-        ctx.write_event_to_stream(
-            Status(
-                level="info",
-                message=f"Recorded extracted data for file {extracted_data.file_name or ''}",
-            )
-        )
-        return StopEvent(result=item.id)
+
+        logger.info(f"Saved resume {state.current_segment_index + 1}: {extracted_data.file_name}")
+
+        # Move to next segment
+        async with ctx.store.edit_state() as state:
+            state.extracted_ids.append(item.id)
+            state.current_segment_index += 1
+            state.extract_job_id = None
+
+        return StartNextExtractionEvent()
 
 
 workflow = ProcessFileWorkflow(timeout=None)
-
-if __name__ == "__main__":
-    from dotenv import load_dotenv
-
-    load_dotenv()
-    logging.basicConfig(level=logging.INFO)
-
-    async def main():
-        file = await get_llama_cloud_client().files.create(
-            file=Path("test.pdf").open("rb"),
-            purpose="extract",
-        )
-        await workflow.run(start_event=FileEvent(file_id=file.id))
-
-    asyncio.run(main())

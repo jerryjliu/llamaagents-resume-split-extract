@@ -1,0 +1,760 @@
+{
+  "process-file": {
+    "name": "ProcessFileWorkflow",
+    "nodes": [
+      {
+        "id": "complete_extraction",
+        "label": "complete_extraction",
+        "node_type": "step",
+        "description": "Complete extraction and save result, then trigger next segment."
+      },
+      {
+        "id": "ExtractJobStartedEvent",
+        "label": "ExtractJobStartedEvent",
+        "node_type": "event",
+        "event_type": "ExtractJobStartedEvent",
+        "event_types": [
+          "ExtractJobStartedEvent"
+        ],
+        "event_schema": {
+          "properties": {},
+          "title": "ExtractJobStartedEvent",
+          "type": "object"
+        }
+      },
+      {
+        "id": "StartNextExtractionEvent",
+        "label": "StartNextExtractionEvent",
+        "node_type": "event",
+        "event_type": "StartNextExtractionEvent",
+        "event_types": [
+          "StartNextExtractionEvent"
+        ],
+        "event_schema": {
+          "properties": {},
+          "title": "StartNextExtractionEvent",
+          "type": "object"
+        }
+      },
+      {
+        "id": "resource_72bc95b563d9",
+        "label": "AsyncLlamaCloud",
+        "node_type": "resource",
+        "type_name": "AsyncLlamaCloud",
+        "getter_name": "get_llama_cloud_client",
+        "source_file": "/home/user/workspace/src/extraction_review/clients.py",
+        "source_line": 27,
+        "description": "Cloud services connection for file storage and processing."
+      },
+      {
+        "id": "resource_config_3bd4dfdcac8c",
+        "label": "Resume Extraction Settings",
+        "node_type": "resource_config",
+        "type_name": "ExtractConfig",
+        "config_file": "/home/user/workspace/configs/config.json",
+        "path_selector": "extract",
+        "config_schema": {
+          "$defs": {
+            "ExtractSettings": {
+              "description": "Extraction settings loaded from configs/config.json extract.settings.",
+              "properties": {
+                "extraction_mode": {
+                  "enum": [
+                    "FAST",
+                    "PREMIUM",
+                    "MULTIMODAL"
+                  ],
+                  "title": "Extraction Mode",
+                  "type": "string"
+                },
+                "system_prompt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "System Prompt"
+                },
+                "citation_bbox": {
+                  "default": false,
+                  "title": "Citation Bbox",
+                  "type": "boolean"
+                },
+                "use_reasoning": {
+                  "default": false,
+                  "title": "Use Reasoning",
+                  "type": "boolean"
+                },
+                "cite_sources": {
+                  "default": false,
+                  "title": "Cite Sources",
+                  "type": "boolean"
+                },
+                "confidence_scores": {
+                  "default": false,
+                  "title": "Confidence Scores",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "extraction_mode"
+              ],
+              "title": "ExtractSettings",
+              "type": "object"
+            }
+          },
+          "description": "Full extraction configuration with schema and settings.",
+          "properties": {
+            "json_schema": {
+              "additionalProperties": true,
+              "title": "Json Schema",
+              "type": "object"
+            },
+            "settings": {
+              "$ref": "#/$defs/ExtractSettings"
+            }
+          },
+          "required": [
+            "json_schema",
+            "settings"
+          ],
+          "title": "ExtractConfig",
+          "type": "object"
+        },
+        "config_value": {
+          "json_schema": {
+            "type": "object",
+            "properties": {
+              "full_name": {
+                "type": "string",
+                "description": "The candidate's full name"
+              },
+              "email": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Email address"
+              },
+              "phone": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Phone number"
+              },
+              "location": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "City, state, or full address"
+              },
+              "linkedin_url": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "LinkedIn profile URL"
+              },
+              "summary": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Professional summary or objective statement"
+              },
+              "skills": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "List of technical and professional skills"
+              },
+              "work_experience": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "company": {
+                      "type": "string",
+                      "description": "Company or organization name"
+                    },
+                    "title": {
+                      "type": "string",
+                      "description": "Job title or position"
+                    },
+                    "start_date": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Start date of employment"
+                    },
+                    "end_date": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "End date or 'Present'"
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Key responsibilities and achievements"
+                    }
+                  },
+                  "required": [
+                    "company",
+                    "title"
+                  ]
+                },
+                "description": "Work history in reverse chronological order"
+              },
+              "education": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "institution": {
+                      "type": "string",
+                      "description": "School or university name"
+                    },
+                    "degree": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Degree type (BS, MS, PhD, etc.)"
+                    },
+                    "field_of_study": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Major or field of study"
+                    },
+                    "graduation_date": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Graduation date or expected graduation"
+                    }
+                  },
+                  "required": [
+                    "institution"
+                  ]
+                },
+                "description": "Educational background"
+              },
+              "certifications": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Professional certifications and licenses"
+              }
+            },
+            "required": [
+              "full_name",
+              "skills",
+              "work_experience",
+              "education"
+            ]
+          },
+          "settings": {
+            "extraction_mode": "PREMIUM",
+            "system_prompt": null,
+            "citation_bbox": true,
+            "use_reasoning": false,
+            "cite_sources": true,
+            "confidence_scores": true
+          }
+        },
+        "description": "Fields to extract from each resume (name, skills, experience, etc.)"
+      },
+      {
+        "id": "complete_split",
+        "label": "complete_split",
+        "node_type": "step",
+        "description": "Wait for split to complete and prepare segments for extraction."
+      },
+      {
+        "id": "SplitJobStartedEvent",
+        "label": "SplitJobStartedEvent",
+        "node_type": "event",
+        "event_type": "SplitJobStartedEvent",
+        "event_types": [
+          "SplitJobStartedEvent"
+        ],
+        "event_schema": {
+          "properties": {},
+          "title": "SplitJobStartedEvent",
+          "type": "object"
+        }
+      },
+      {
+        "id": "StopEvent",
+        "label": "StopEvent",
+        "node_type": "event",
+        "event_type": "StopEvent",
+        "event_types": [
+          "StopEvent"
+        ],
+        "event_schema": {
+          "description": "Terminal event that signals the workflow has completed.\n\nThe `result` property contains the return value of the workflow run. When a\ncustom stop event subclass is used, the workflow result is that event\ninstance itself.\n\nExamples:\n    ```python\n    # default stop event: result holds the value\n    return StopEvent(result={\"answer\": 42})\n    ```\n\n    Subclassing to provide a custom result:\n\n    ```python\n    class MyStopEv(StopEvent):\n        pass\n\n    @step\n    async def my_step(self, ctx: Context, ev: StartEvent) -> MyStopEv:\n        return MyStopEv(result={\"answer\": 42})",
+          "properties": {},
+          "title": "StopEvent",
+          "type": "object"
+        }
+      },
+      {
+        "id": "start_extraction",
+        "label": "start_extraction",
+        "node_type": "step",
+        "description": "Start extraction for the current resume segment."
+      },
+      {
+        "id": "start_split",
+        "label": "start_split",
+        "node_type": "step",
+        "description": "Upload document and start splitting into individual resumes."
+      },
+      {
+        "id": "FileEvent",
+        "label": "FileEvent",
+        "node_type": "event",
+        "event_type": "FileEvent",
+        "event_types": [
+          "FileEvent",
+          "StartEvent"
+        ],
+        "event_schema": {
+          "properties": {
+            "file_id": {
+              "title": "File Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "file_id"
+          ],
+          "title": "FileEvent",
+          "type": "object"
+        }
+      },
+      {
+        "id": "resource_config_5c2a7318ca50",
+        "label": "Resume Split Settings",
+        "node_type": "resource_config",
+        "type_name": "SplitConfig",
+        "config_file": "/home/user/workspace/configs/config.json",
+        "path_selector": "split",
+        "config_schema": {
+          "$defs": {
+            "SplitCategory": {
+              "description": "A category for document splitting.",
+              "properties": {
+                "name": {
+                  "title": "Name",
+                  "type": "string"
+                },
+                "description": {
+                  "title": "Description",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "description"
+              ],
+              "title": "SplitCategory",
+              "type": "object"
+            },
+            "SplitSettings": {
+              "description": "Settings for document splitting.",
+              "properties": {},
+              "title": "SplitSettings",
+              "type": "object"
+            }
+          },
+          "description": "Split configuration with categories and settings.",
+          "properties": {
+            "categories": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/SplitCategory"
+              },
+              "title": "Categories",
+              "type": "array"
+            },
+            "settings": {
+              "$ref": "#/$defs/SplitSettings",
+              "default": {}
+            }
+          },
+          "title": "SplitConfig",
+          "type": "object"
+        },
+        "config_value": {
+          "categories": [
+            {
+              "name": "resume",
+              "description": "An individual resume or CV containing a person's name, contact information, work experience, education, and skills"
+            }
+          ],
+          "settings": {}
+        },
+        "description": "Categories for identifying individual resumes in a resume book"
+      }
+    ],
+    "edges": [
+      {
+        "source": "complete_extraction",
+        "target": "StartNextExtractionEvent",
+        "label": null
+      },
+      {
+        "source": "ExtractJobStartedEvent",
+        "target": "complete_extraction",
+        "label": null
+      },
+      {
+        "source": "complete_extraction",
+        "target": "resource_72bc95b563d9",
+        "label": "llama_cloud_client"
+      },
+      {
+        "source": "complete_extraction",
+        "target": "resource_config_3bd4dfdcac8c",
+        "label": "extract_config"
+      },
+      {
+        "source": "complete_split",
+        "target": "StartNextExtractionEvent",
+        "label": null
+      },
+      {
+        "source": "complete_split",
+        "target": "StopEvent",
+        "label": null
+      },
+      {
+        "source": "SplitJobStartedEvent",
+        "target": "complete_split",
+        "label": null
+      },
+      {
+        "source": "complete_split",
+        "target": "resource_72bc95b563d9",
+        "label": "llama_cloud_client"
+      },
+      {
+        "source": "start_extraction",
+        "target": "ExtractJobStartedEvent",
+        "label": null
+      },
+      {
+        "source": "start_extraction",
+        "target": "StopEvent",
+        "label": null
+      },
+      {
+        "source": "StartNextExtractionEvent",
+        "target": "start_extraction",
+        "label": null
+      },
+      {
+        "source": "start_extraction",
+        "target": "resource_72bc95b563d9",
+        "label": "llama_cloud_client"
+      },
+      {
+        "source": "start_extraction",
+        "target": "resource_config_3bd4dfdcac8c",
+        "label": "extract_config"
+      },
+      {
+        "source": "start_split",
+        "target": "SplitJobStartedEvent",
+        "label": null
+      },
+      {
+        "source": "FileEvent",
+        "target": "start_split",
+        "label": null
+      },
+      {
+        "source": "start_split",
+        "target": "resource_72bc95b563d9",
+        "label": "llama_cloud_client"
+      },
+      {
+        "source": "start_split",
+        "target": "resource_config_5c2a7318ca50",
+        "label": "split_config"
+      }
+    ],
+    "description": "Split a resume book into individual resumes and extract information from each.",
+    "workflow_path": "/home/user/workspace/src/extraction_review/process_file.py"
+  },
+  "metadata": {
+    "name": "MetadataWorkflow",
+    "nodes": [
+      {
+        "id": "get_metadata",
+        "label": "get_metadata",
+        "node_type": "step",
+        "description": "Return the data schema and storage settings for the review interface."
+      },
+      {
+        "id": "StartEvent",
+        "label": "StartEvent",
+        "node_type": "event",
+        "event_type": "StartEvent",
+        "event_types": [
+          "StartEvent"
+        ],
+        "event_schema": {
+          "description": "Implicit entry event sent to kick off a `Workflow.run()`.",
+          "properties": {},
+          "title": "StartEvent",
+          "type": "object"
+        }
+      },
+      {
+        "id": "MetadataResponse",
+        "label": "MetadataResponse",
+        "node_type": "event",
+        "event_type": "MetadataResponse",
+        "event_types": [
+          "MetadataResponse",
+          "StopEvent"
+        ],
+        "event_schema": {
+          "properties": {
+            "json_schema": {
+              "additionalProperties": true,
+              "title": "Json Schema",
+              "type": "object"
+            },
+            "extracted_data_collection": {
+              "title": "Extracted Data Collection",
+              "type": "string"
+            }
+          },
+          "required": [
+            "json_schema",
+            "extracted_data_collection"
+          ],
+          "title": "MetadataResponse",
+          "type": "object"
+        }
+      },
+      {
+        "id": "resource_config_9ab05cad7fa5",
+        "label": "Extraction Schema",
+        "node_type": "resource_config",
+        "type_name": "JsonSchema",
+        "config_file": "/home/user/workspace/configs/config.json",
+        "path_selector": "extract.json_schema",
+        "config_schema": {
+          "description": "Pydantic wrapper for a JSON schema loaded via ResourceConfig.",
+          "properties": {
+            "type": {
+              "default": "object",
+              "title": "Type",
+              "type": "string"
+            },
+            "properties": {
+              "type": "object",
+              "additionalProperties": true,
+              "default": {},
+              "title": "Properties"
+            },
+            "required": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "title": "Required",
+              "type": "array"
+            }
+          },
+          "title": "JsonSchema",
+          "type": "object"
+        },
+        "config_value": {
+          "type": "object",
+          "properties": {
+            "full_name": {
+              "type": "string",
+              "description": "The candidate's full name"
+            },
+            "email": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Email address"
+            },
+            "phone": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Phone number"
+            },
+            "location": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "City, state, or full address"
+            },
+            "linkedin_url": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "LinkedIn profile URL"
+            },
+            "summary": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Professional summary or objective statement"
+            },
+            "skills": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "List of technical and professional skills"
+            },
+            "work_experience": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "company": {
+                    "type": "string",
+                    "description": "Company or organization name"
+                  },
+                  "title": {
+                    "type": "string",
+                    "description": "Job title or position"
+                  },
+                  "start_date": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Start date of employment"
+                  },
+                  "end_date": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "End date or 'Present'"
+                  },
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Key responsibilities and achievements"
+                  }
+                },
+                "required": [
+                  "company",
+                  "title"
+                ]
+              },
+              "description": "Work history in reverse chronological order"
+            },
+            "education": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "institution": {
+                    "type": "string",
+                    "description": "School or university name"
+                  },
+                  "degree": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Degree type (BS, MS, PhD, etc.)"
+                  },
+                  "field_of_study": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Major or field of study"
+                  },
+                  "graduation_date": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Graduation date or expected graduation"
+                  }
+                },
+                "required": [
+                  "institution"
+                ]
+              },
+              "description": "Educational background"
+            },
+            "certifications": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Professional certifications and licenses"
+            }
+          },
+          "required": [
+            "full_name",
+            "skills",
+            "work_experience",
+            "education"
+          ]
+        },
+        "description": "JSON Schema defining the fields to extract from documents"
+      }
+    ],
+    "edges": [
+      {
+        "source": "get_metadata",
+        "target": "MetadataResponse",
+        "label": null
+      },
+      {
+        "source": "StartEvent",
+        "target": "get_metadata",
+        "label": null
+      },
+      {
+        "source": "get_metadata",
+        "target": "resource_config_9ab05cad7fa5",
+        "label": "extraction_schema"
+      }
+    ],
+    "description": "Provide extraction schema and configuration to the workflow editor.",
+    "workflow_path": "/home/user/workspace/src/extraction_review/metadata_workflow.py"
+  }
+}

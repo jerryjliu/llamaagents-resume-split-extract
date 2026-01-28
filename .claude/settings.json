@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash",
+      "Write(**.py)",
+      "Edit(**.py)",
+      "mcp__llama-index-docs",
+      "mcp__poison_pill__poison_pill",
+      "mcp__test_results_mcp__retrieve_test_results",
+      "mcp__ruff__ruff_fix"
+    ],
+    "deny": [
+      "Write(**.md)",
+      "Edit(**.md)",
+      "Write(**.js)",
+      "Edit(**.js)",
+      "Write(**.ts)",
+      "Edit(**.ts)"
+    ]
+  },
+  "enableAllProjectMcpServers": true
+}
