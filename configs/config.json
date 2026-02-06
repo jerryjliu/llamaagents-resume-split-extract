@@ -3,25 +3,120 @@
     "json_schema": {
       "type": "object",
       "properties": {
-        "document_type": {
+        "candidate_name": {
           "type": "string",
-          "description": "An overarching category for the type of document (e.g. invoice, purchase order, etc.)"
+          "description": "Full name of the candidate"
+        },
+        "email": {
+          "type": ["string", "null"],
+          "description": "Email address of the candidate"
+        },
+        "phone": {
+          "type": ["string", "null"],
+          "description": "Phone number of the candidate"
+        },
+        "location": {
+          "type": ["string", "null"],
+          "description": "Location or address of the candidate"
+        },
+        "linkedin_url": {
+          "type": ["string", "null"],
+          "description": "LinkedIn profile URL if present"
         },
         "summary": {
-          "type": "string",
-          "description": "A 2-3 sentence summary describing the content of the document"
+          "type": ["string", "null"],
+          "description": "Professional summary or objective statement"
         },
-        "key_points": {
+        "work_experience": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "company": {
+                "type": "string",
+                "description": "Name of the employer"
+              },
+              "title": {
+                "type": "string",
+                "description": "Job title held"
+              },
+              "start_date": {
+                "type": ["string", "null"],
+                "description": "Start date of employment"
+              },
+              "end_date": {
+                "type": ["string", "null"],
+                "description": "End date of employment, or 'Present' if current"
+              },
+              "responsibilities": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Key responsibilities and achievements"
+              }
+            },
+            "required": ["company", "title", "responsibilities"]
+          },
+          "description": "List of work experiences in reverse chronological order"
+        },
+        "education": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "institution": {
+                "type": "string",
+                "description": "Name of the school or university"
+              },
+              "degree": {
+                "type": ["string", "null"],
+                "description": "Degree obtained or pursued"
+              },
+              "field_of_study": {
+                "type": ["string", "null"],
+                "description": "Major or field of study"
+              },
+              "graduation_date": {
+                "type": ["string", "null"],
+                "description": "Graduation date or expected graduation"
+              }
+            },
+            "required": ["institution"]
+          },
+          "description": "Educational background"
+        },
+        "skills": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "A list of key points or insights from the document"
+          "description": "List of technical and professional skills"
+        },
+        "certifications": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Name of the certification"
+              },
+              "issuer": {
+                "type": ["string", "null"],
+                "description": "Organization that issued the certification"
+              },
+              "date": {
+                "type": ["string", "null"],
+                "description": "Date obtained"
+              }
+            },
+            "required": ["name"]
+          },
+          "description": "Professional certifications"
         }
       },
-      "required": ["document_type", "summary", "key_points"]
+      "required": ["candidate_name", "email", "phone", "location", "linkedin_url", "summary", "work_experience", "education", "skills", "certifications"]
     },
     "settings": {
       "extraction_mode": "PREMIUM",
-      "system_prompt": null,
+      "system_prompt": "Extract resume information accurately. For dates, use the format as shown on the resume. If a field is not present, return null.",
       "citation_bbox": true,
       "use_reasoning": false,
       "cite_sources": true,
@@ -29,8 +124,17 @@
     }
   },
   "split": {
-    "categories": [],
-    "settings": {}
+    "categories": [
+      {
+        "name": "resume",
+        "description": "An individual resume or CV containing a person's name, contact information, work experience, education, and skills. Each resume belongs to a single candidate."
+      }
+    ],
+    "settings": {
+      "splitting_strategy": {
+        "allow_uncategorized": false
+      }
+    }
   },
   "classify": {
     "rules": [],
